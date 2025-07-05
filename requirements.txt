@@ -1,0 +1,24 @@
+streamlit==1.32.0
+langchain>=0.3.15
+langchain-core>=0.3.63
+langchain-community>=0.0.38
+langgraph>=0.4.8
+langsmith>=0.3.44
+groq>=0.4.3
+python-dotenv==1.0.1
+SpeechRecognition==3.10.1
+pyttsx3==2.90
+Pillow==10.2.0
+pydantic>=2.9.2,<3.0.0
+typing-extensions>=4.11.0
+openai>=1.79.0
+pandas
+langchain-ollama
+langchain-chroma
+chromadb
+# OCR and PDF dependencies
+pytesseract
+opencv-python
+pdf2image
+imageio
+pdfplumber

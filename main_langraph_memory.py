@@ -11,7 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 from collections import deque
-from vector import retriever
+from vector import retriever, enhanced_retriever_instance
 import re
 import speech_recognition as sr
 import pyttsx3
@@ -19,9 +19,52 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 import torch
 import importlib.util
+import requests
+import streamlit as st
 
 
 load_dotenv()
+
+class BlandAI:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.headers = {
+            'authorization': self.api_key,
+            'Content-Type': 'application/json'
+        }
+        
+    def call(self, phone_number, pathway_id, first_sentence, **kwargs):
+        url = 'https://api.bland.ai/v1/calls'
+        data = {
+            'phone_number': phone_number,
+            'pathway_id': pathway_id,
+            'first_sentence': first_sentence
+        }
+        # Add any additional keyword arguments to the payload
+        data.update(kwargs)
+        response = requests.post(url, json=data, headers=self.headers)
+        return response.json()
+    
+    def logs(self, call_id):
+        url = 'https://api.bland.ai/v1/logs'
+        data = {'call_id': call_id}
+        response = requests.post(url, json=data, headers=self.headers)
+        return response.json()
+
+    def hold(self, call_id):
+        url = 'https://api.bland.ai/v1/hold'
+        data = {'call_id': call_id}
+        response = requests.post(url, json=data, headers=self.headers)
+        return response.json()
+
+    def end_call(self, call_id):
+        url = 'https://api.bland.ai/v1/end'
+        data = {'call_id': call_id}
+        response = requests.post(url, json=data, headers=self.headers)
+        return response.json()
+
+# Initialize BlandAI with API key
+bland_ai = BlandAI("org_cadc2d5640e34cedbced0d3627c9236efc7f1e0424737b6d039a53a8d622fe0bca47e1b19cd0e5e7a3f169")
 
 engine = pyttsx3.init()
 engine.setProperty('rate', 150)
@@ -139,9 +182,18 @@ def manage_memory(state: State) -> State:
 def classify_message(state: State):
     last_message = state["messages"][-1]
 
-    system_prompt = """Classify the user message as either:
-    - 'true': if it mentions any names or any confidential information relating to insurance policies in the query.
-    - 'false': if it asks for basic doubts regarding their insurance policies wihout mentioning any of their confidential information in the query.
+    system_prompt = """Classify the user message into one of three categories:
+    - 'call': if the user wants to place a call, make a call, or requests phone assistance
+    - 'true': if it mentions any names or any confidential information relating to insurance policies in the query (but not a call request)
+    - 'false': if it asks for basic doubts regarding their insurance policies without mentioning any of their confidential information in the query
+
+    Examples of 'call' messages:
+    - "I want to place a call"
+    - "Can you call me?"
+    - "Make a call to my number"
+    - "I need to speak with someone on the phone"
+    - "Call me at my number"
+    - "Place a call to discuss my policy"
 
     Examples of 'true' messages:
     - "What is the premium amount for the policy number 1234567890?(see its mentioning the policy number)"
@@ -154,7 +206,7 @@ def classify_message(state: State):
     - "what is my policy number?(see its asking for basic doubts regarding the policy)"
     - no mentioning of their names or any confidential information in the query.
     
-    Respond with only one word: either "true" or "false".
+    Respond with only one word: either "call", "true", or "false".
     """
 
     formatted_messages = [
@@ -172,10 +224,12 @@ def classify_message(state: State):
 
 def confid_checker(state: State):
     message_type = state.get("message_type", "false")
-    if message_type == "true":
+    if message_type == "call":
+        return {"next": "call_placement"}
+    elif message_type == "true":
         return {"next": "RAG_model"}
-
-    return {"next": "FT_model"}
+    else:
+        return {"next": "FT_model"}
 
 
 def RAG(state: State):
@@ -183,7 +237,9 @@ def RAG(state: State):
     last_message = state["messages"][-1]
     question = last_message.content
     print(f"Processing question: {question}")
-    details = retriever.invoke(question)
+    
+    # Use enhanced retriever for family insurance queries
+    details = enhanced_retriever_instance(question)
     
     clean_details = "\n".join([doc.page_content for doc in details])
 
@@ -205,7 +261,13 @@ def RAG(state: State):
             6. Review the entire conversation history before responding.
             7. If the user introduces themselves with a new name, update their identity but maintain consistency with that new identity.
             8. When retrieving information, only use details that match the current user's identity.
-            9. If retrieved information conflicts with the current user's identity, prioritize the user's stated identity."""
+            9. If retrieved information conflicts with the current user's identity, prioritize the user's stated identity.
+            10. For family-related queries, group all policies by FamilyID and show all family members with their respective policies.
+            11. When asked about family details, list all people under the same FamilyID with their policy information.
+            12. Include nominee information when available in your responses.
+            13. When responding to family insurance queries, organize the information clearly by family member, showing each person's policies separately.
+            14. For family queries, provide a comprehensive overview of all family members' insurance coverage, including policy types, premiums, and expiry dates.
+            15. Always mention the FamilyID when discussing family insurance to help users understand the grouping."""
         }
     ]
 
@@ -259,13 +321,24 @@ def FT(state: State, model, tokenizer):
         "4. Offer general insurance advice while maintaining professional boundaries\n"
         "5. Direct users to appropriate resources when specific personal advice is needed\n\n"
         "RESPONSE GUIDELINES:\n"
-        "1. Be informative and educational - explain concepts clearly\n"
-        "2. Maintain professional tone while being approachable\n"
-        "3. When discussing specific policies (like Golden Plans), provide comprehensive details\n"
-        "4. Always mention important considerations like state availability and underwriting requirements\n"
+        "1. Be informative and educational - explain concepts clearly with specific details\n"
+        "2. Maintain professional tone while being approachable and empathetic\n"
+        "3. When discussing specific policies, provide comprehensive details including coverage, exclusions, and benefits\n"
+        "4. Always mention important considerations like state availability, underwriting requirements, and waiting periods\n"
         "5. Encourage users to contact insurance companies or financial advisors for personalized advice\n"
         "6. Use clear structure with bullet points or numbered lists when appropriate\n"
-        "7. Include relevant examples and scenarios to illustrate points\n\n"
+        "7. Include relevant examples and scenarios to illustrate points\n"
+        "8. Provide actionable next steps and recommendations\n"
+        "9. Address user concerns proactively and offer solutions\n"
+        "10. Use specific numbers, percentages, and timeframes when available\n\n"
+        "DETAILED RESPONSE STRUCTURE:\n"
+        "1. Start with a clear, direct answer to the user's question\n"
+        "2. Provide comprehensive details with specific information\n"
+        "3. Include relevant policy features, benefits, and limitations\n"
+        "4. Mention important considerations and requirements\n"
+        "5. Provide practical examples or scenarios\n"
+        "6. Offer actionable recommendations and next steps\n"
+        "7. End with a helpful summary or key takeaways\n\n"
         "IMPORTANT RULES:\n"
         "1. Always maintain consistency in user information throughout the conversation\n"
         "2. If unsure about user details, ask for clarification rather than making assumptions\n"
@@ -275,8 +348,18 @@ def FT(state: State, model, tokenizer):
         "6. Review entire conversation history before responding\n"
         "7. Update user identity when new information is provided\n"
         "8. Prioritize user-stated identity over conflicting retrieved information\n"
-        "9. For specific policy questions, provide general information and recommend direct contact\n"
-        "10. Always mention the importance of consulting with insurance professionals for personalized advice"
+        "9. For specific policy questions, provide detailed general information and recommend direct contact\n"
+        "10. Always mention the importance of consulting with insurance professionals for personalized advice\n"
+        "11. For family-related queries, group all policies by FamilyID and show all family members with their respective policies\n"
+        "12. When asked about family details, list all people under the same FamilyID with their policy information\n"
+        "13. Include nominee information when available in your responses\n"
+        "14. When responding to family insurance queries, organize the information clearly by family member, showing each person's policies separately\n"
+        "15. For family queries, provide a comprehensive overview of all family members' insurance coverage, including policy types, premiums, and expiry dates\n"
+        "16. Always mention the FamilyID when discussing family insurance to help users understand the grouping\n"
+        "17. Provide specific, actionable information rather than generic responses\n"
+        "18. Include relevant statistics, examples, and comparisons when helpful\n"
+        "19. Address potential concerns and objections proactively\n"
+        "20. Offer multiple options or alternatives when applicable"
     )
 
     # Build the conversation prompt
@@ -287,6 +370,7 @@ def FT(state: State, model, tokenizer):
             prompt += f"<|{role}|>\n{msg.content}\n</s>\n"
     if state.get("summary"):
         prompt += f"<|system|>\nPrevious conversation summary: {state['summary']}\nUse this summary to maintain context and consistency in your responses.\n</s>\n"
+    prompt += f"<|system|>\nIMPORTANT: Provide a detailed, comprehensive response with specific information, examples, and actionable advice. Be thorough and helpful in your explanation.\n</s>\n"
     prompt += f"<|user|>\n{last_message.content}\n</s>\n<|assistant|>\n"
 
     # Tokenize and generate
@@ -294,10 +378,13 @@ def FT(state: State, model, tokenizer):
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
-            max_new_tokens=400,
+            max_new_tokens=600,
             do_sample=True,
-            temperature=0.3,
-            top_p=0.9,
+            temperature=0.4,
+            top_p=0.92,
+            top_k=50,
+            repetition_penalty=1.1,
+            length_penalty=1.0,
             eos_token_id=tokenizer.eos_token_id
         )
     result = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -313,12 +400,107 @@ def FT(state: State, model, tokenizer):
     }
 
 
+def call_placement(state: State):
+    """Handle call placement requests using BlandAI"""
+    state = manage_memory(state)
+    last_message = state["messages"][-1]
+    
+    # Extract phone number from the message if provided
+    phone_number = None
+    message_content = last_message.content.lower()
+    
+    # Look for phone number patterns in the message
+    import re
+    phone_patterns = [
+        r'\+?1?\s*\(?[0-9]{3}\)?[\s.-]?[0-9]{3}[\s.-]?[0-9]{4}',  # US format
+        r'\+?91\s*[0-9]{10}',  # Indian format
+        r'\+?[0-9]{1,3}\s*[0-9]{10}',  # International format
+        r'[0-9]{10}',  # Simple 10-digit
+    ]
+    
+    for pattern in phone_patterns:
+        match = re.search(pattern, last_message.content)
+        if match:
+            phone_number = match.group(0)
+            break
+    
+    # Extract payment amount if mentioned
+    payment_amount = None
+    payment_pattern = r'₹(\d+(?:,\d+)*(?:\.\d{2})?)'
+    payment_match = re.search(payment_pattern, last_message.content)
+    if payment_match:
+        payment_amount = payment_match.group(1).replace(',', '')
+    
+    # Extract customer name if mentioned
+    customer_name = None
+    name_patterns = [
+        r'calling (\w+(?:\s+\w+)*)',
+        r'customer (\w+(?:\s+\w+)*)',
+        r'(\w+(?:\s+\w+)*) regarding'
+    ]
+    for pattern in name_patterns:
+        match = re.search(pattern, last_message.content, re.IGNORECASE)
+        if match:
+            customer_name = match.group(1)
+            break
+    
+    # If no phone number found, ask for it
+    if not phone_number:
+        response = "I'd be happy to place a call for you! Could you please provide your phone number so I can connect you with our insurance specialist?"
+        return {
+            "messages": [AIMessage(content=response)],
+            "memory": state.get("memory", {}),
+            "summary": state.get("summary")
+        }
+    
+    try:
+        # Prepare call message based on context
+        if payment_amount and customer_name:
+            call_message = f"Hello! This is a call from InsurAI. We're calling {customer_name} regarding premium payment collection. The outstanding amount is ₹{payment_amount}. Please be ready to collect the payment and provide payment options."
+        elif customer_name:
+            call_message = f"Hello! This is a call from InsurAI. We're calling {customer_name} regarding their insurance policy. How can we assist you today?"
+        else:
+            call_message = "Hello! This is a call from InsurAI. We're here to assist you with your insurance needs."
+        
+        # Place the call using BlandAI
+        call_response = bland_ai.call(
+            phone_number=phone_number,
+            pathway_id="67ca7361-290c-4582-9b5f-26afd460653e",
+            first_sentence=call_message
+        )
+        
+        if call_response.get("success"):
+            call_id = call_response.get("call_id")
+            response = f"Great! I've initiated a call to {phone_number}."
+            
+            if customer_name:
+                response += f" Our AI specialist will be calling {customer_name}."
+            
+            if payment_amount:
+                response += f" The call will focus on collecting the outstanding premium amount of ₹{payment_amount}."
+            
+            response += f" Your call ID is {call_id}. The AI agent will handle the conversation professionally and collect any required payments."
+        else:
+            error_msg = call_response.get("error", "Unknown error")
+            response = f"I apologize, but I encountered an issue placing the call: {error_msg}. Please try again or contact our support team directly."
+            
+    except Exception as e:
+        response = f"I apologize, but there was an error placing the call: {str(e)}. Please try again or contact our support team directly."
+    
+    return {
+        "messages": [AIMessage(content=response)],
+        "memory": state.get("memory", {}),
+        "summary": state.get("summary")
+    }
+
+
 graph_builder = StateGraph(State)
 
 graph_builder.add_node("classifier", classify_message)
 graph_builder.add_node("router", confid_checker)
 graph_builder.add_node("RAG_model", RAG)
 graph_builder.add_node("FT_model", FT)
+graph_builder.add_node("call_placement", call_placement)
 
 graph_builder.add_edge(START, "classifier")
 graph_builder.add_edge("classifier", "router")
@@ -328,12 +510,14 @@ graph_builder.add_conditional_edges(
     lambda state: state.get("next"),
     {
         "RAG_model": "RAG_model",
-        "FT_model": "FT_model"
+        "FT_model": "FT_model",
+        "call_placement": "call_placement"
     }
 )
 
 graph_builder.add_edge("RAG_model", END)
 graph_builder.add_edge("FT_model", END)
+graph_builder.add_edge("call_placement", END)
 
 graph = graph_builder.compile(checkpointer=MemorySaver())
 
@@ -342,7 +526,7 @@ def run_chatbot():
     state = {"messages": [], "message_type": None, "memory": {}, "summary": None}
 
     print("Chatbot started. Say 'quit' to end the conversation.")
-    #    speak("Hello! I'm your insurance assistant. How can I help you today?")
+    speak("Hello! I'm your insurance assistant. How can I help you today?")
    
 
     while True:
@@ -364,7 +548,7 @@ def run_chatbot():
             if state.get("messages") and len(state["messages"]) > 0:
                 last_message = state["messages"][-1]
                 print(f"Assistant: {last_message.content}")
-#                speak(last_message.content)
+                speak(last_message.content)
             else:
                 print("No valid response from model.")
                 speak("Sorry, I didn't get a response.")
@@ -376,3 +560,26 @@ def run_chatbot():
 
 if __name__ == "__main__":
     run_chatbot()
+
+st.markdown("""
+<div class="upload-section">
+    <div class="upload-header">
+        <h3 style="color:#00ff88;">🚀 AI Assistant Features</h3>
+    </div>
+    <p style="color:#f3f3f3;">The AI agent can help you with various insurance-related tasks!</p>
+    <p style="color:#00d4ff;"><strong>📞 Call Placement:</strong></p>
+    <ul style="color:#f3f3f3;">
+        <li>I want to place a call</li>
+        <li>Can you call me at +919744930824?</li>
+        <li>Make a call to discuss my policy</li>
+        <li>I need to speak with someone on the phone</li>
+    </ul>
+    <p style="color:#00d4ff;"><strong>👨‍👩‍👧‍👦 Family Insurance:</strong></p>
+    <ul style="color:#f3f3f3;">
+        <li>Show me family insurance details for John Smith</li>
+        <li>What are the family policies for policy number 1234567890</li>
+        <li>Get insurance details for my family members</li>
+        <li>Show me all policies for my spouse and children</li>
+    </ul>
+</div>
+""", unsafe_allow_html=True)

@@ -4,7 +4,7 @@
 
 ![InsurAI](https://img.shields.io/badge/InsurAI-Insurance%20AI-blue?style=for-the-badge&logo=shield-check)
 
-**AI-powered insurance agent with document processing, voice interaction, and intelligent customer support**
+**AI-powered insurance agent with document processing, voice-enabled call placement, and intelligent customer support**
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.4.8+-green.svg)](https://langchain.com/langgraph/)
@@ -14,30 +14,38 @@
 
 ## 🚀 Overview
 
-InsurAI is an intelligent insurance agent that helps insurance companies manage customer data, process policy documents, and provide AI-powered customer support. Built with LangGraph for robust AI workflows and pdfplumber for document processing.
+InsurAI is an intelligent insurance agent that helps insurance companies manage customer data, process policy documents, and provide AI-powered customer support. Built with LangGraph for robust AI workflows and pdfplumber for document processing. The app features a modern, dark-themed UI for an intuitive user experience.
 
 ## ✨ Key Features
 
-- **🤖 Agentic AI Workflow**: Combines RAG and fine-tuned models using LangGraph
+- **🤖 Agentic AI Workflow**: Combines RAG and fine-tuned models using LangGraph for smart, context-aware insurance support
 - **📄 PDF Processing**: Extract policy data using pdfplumber and OCR
-- **🎤 Voice Interaction**: Speech-to-text and text-to-speech capabilities
-- **🔍 Smart Querying**: Query customer insurance details instantly
+- **🎤 Voice-Enabled Call Placement**: Admins can place automated voice calls for premium collection and support (not direct voice chat yet)
+- **🔐 User Authentication & Roles**: Secure login system with role-based access (admin and user); admins have access to extra features like call placement and admin panel
+- **📊 Dashboard & Analytics**: Visualize insurance data, filter by type/family, and export as CSV
+- **💬 AI Chat Assistant**: Query customer insurance details and general questions with context-aware responses
 - **💾 Vector Database**: ChromaDB for efficient data storage and retrieval
-- **🔒 Privacy-Aware**: Intelligent classification of confidential vs. general queries
+- **👨‍👩‍👧‍👦 Family Insurance Management**: Manage and filter policies by FamilyID and nominee (core features implemented; more planned)
+- **🔒 Privacy-Aware**: Intelligent classification of confidential vs. general queries, secure routing, and memory management
+- **🌙 Modern UI/UX**: Responsive, dark-themed interface with feature cards, animated sections, and easy navigation
 
 ## 📁 Project Files
 
 | File | Purpose |
 |------|---------|
-| **`app.py`** | Main Streamlit web application with modern dark UI |
+| **`landing_app.py`** | Main Streamlit web application with modern UI, navigation, and all features |
+| **`app.py`** | Alternate/legacy Streamlit app (see landing_app.py for main UI) |
+| **`auth.py`** | User authentication, login, registration, and admin panel logic |
 | **`data_gen.py`** | Generate synthetic insurance data for testing |
 | **`ocr.py`** | Extract policy information from PDFs using pdfplumber |
-| **`main_langraph_memory.py`** | LangGraph AI workflow with memory management |
+| **`main_langraph_memory.py`** | LangGraph AI workflow with memory management and call placement logic |
+| **`vector.py`** | Vector database setup and retrieval for RAG system |
 | **`requirements.txt`** | Python dependencies and packages |
 | **`chrome_langchain_db/`** | ChromaDB vector database storage |
 | **`llama-insurance-v1_tinyllama/`** | Fine-tuned TinyLlama model for insurance queries |
 | **`insurance_data.csv`** | Sample insurance data for testing |
 | **`extracted_insurance_data.csv`** | Processed PDF data output |
+| **`users.json`** | User credentials and roles |
 
 ## 🛠️ Quick Setup
 
@@ -69,15 +77,17 @@ ollama pull mxbai-embed-large
 echo "GROQ_API_KEY=your_key_here" > .env
 
 # Run the application
-streamlit run app.py
+streamlit run landing_app.py
 ```
 
 ## 🚀 Usage
 
-1. **Upload PDFs**: Use sidebar to upload insurance policy PDFs
-2. **Ask Questions**: Query customer data or general insurance questions
-3. **Get AI Responses**: Receive intelligent, context-aware answers
-4. **Export Data**: Download processed data as CSV
+1. **Login/Register**: Create an account or log in (admins get extra features)
+2. **Upload PDFs**: Use sidebar to upload insurance policy PDFs
+3. **Ask Questions**: Query customer data or general insurance questions in the Chat Assistant
+4. **Get AI Responses**: Receive intelligent, context-aware answers
+5. **Export Data**: Download processed data as CSV
+6. **(Admin) Place Calls**: Use the Call Placement page to request automated voice calls for premium collection or support
 
 ### Example Queries
 
@@ -88,6 +98,11 @@ streamlit run app.py
 **Customer Data Queries:**
 - "What is the premium for policy number 1234567890?"
 - "Show me John Smith's policy details"
+- "Who is the nominee for policy 1234567890?"
+- "Show me all policies where Mary Johnson is the nominee"
+
+**Call Placement (Admin):**
+- Select a customer and request a call for premium payment collection or support
 
 ## 🏗️ Architecture
 
@@ -95,6 +110,7 @@ streamlit run app.py
 User Input → Classifier → Router → RAG/FT Model → Response
      ↓           ↓         ↓         ↓
 PDF Upload → OCR Processing → Data Storage → Vector DB
+Call Placement (Admin) → Automated Voice Call Service
 ```
 
 ## 🔧 Configuration
@@ -112,25 +128,29 @@ SUMMARY_THRESHOLD = 8  # Summarization trigger
 
 ## 🔒 Security Features
 
+- **User Authentication & Roles**: Secure login, admin/user roles, admin panel
 - **Confidential Data Detection**: Automatically identifies sensitive information
 - **Secure Routing**: Routes confidential queries to RAG system
 - **Data Validation**: Validates extracted data before storage
 - **Memory Management**: Conversation summarization for privacy
 
-## 🚧 Future Features
+## 🚧 Current & Future Features
 
-- **Family Member Info Collection**: Comprehensive family policy management
-- **Calling Agent Feature**: AI-powered voice calling capabilities
-- **Enhanced Analytics**: Advanced reporting and insights
-- **Mobile Application**: Native mobile app for field agents
+- **Family Member Info Collection**: Core features (FamilyID, nominee) implemented; more advanced management planned
+- **Call Placement**: Automated voice call feature for admins is implemented
+- **Voice Chat**: Voice-enabled chat is planned (currently, only call placement is voice-enabled)
+- **Enhanced Analytics**: Advanced reporting and insights planned
+- **Mobile Application**: Native mobile app for field agents planned
 
 ## 📊 Data Processing
 
 ### Extracted Fields
-- PolicyID, Name, DOB, PolicyNumber
-- InsuranceType, IssueDate, ExpiryDate
-- PremiumAmount, AccountNumber, IFSCCode, GSTNumber
-- Details and additional policy information
+- **Policy Info**: PolicyID, Name, DOB, PolicyNumber, InsuranceType
+- **Dates**: IssueDate, ExpiryDate
+- **Financial**: PremiumAmount, AccountNumber, IFSCCode, GSTNumber
+- **Family**: FamilyID
+- **Nominee**: NomineeName
+- **Details**: Additional policy information
 
 ### Generate Test Data
 ```bash

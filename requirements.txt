@@ -22,3 +22,11 @@ opencv-python
 pdf2image
 imageio
 pdfplumber
+reportlab
+names
+
+# AI and ML dependencies
+transformers
+peft
+torch
+Pillow

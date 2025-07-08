@@ -339,7 +339,8 @@ import tempfile
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from peft import PeftModel
 from main_langraph_memory import (
     StateGraph, START, END, add_messages, classify_message, confid_checker, RAG, FT, State, HumanMessage, AIMessage, manage_memory

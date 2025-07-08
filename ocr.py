@@ -12,7 +12,14 @@ def extract_policy_info(pdf_path):
         for page in pdf.pages:
             text = page.extract_text()
             
-            # Initialize a dictionary with all required fields
+            # Debug: Print first few lines to see the format
+            print(f"Processing PDF: {pdf_path}")
+            print("First 10 lines of extracted text:")
+            for i, line in enumerate(text.split('\n')[:10]):
+                print(f"Line {i+1}: {line}")
+            print("-" * 50)
+            
+            # Initialize a dictionary with all required fields including nominee name only
             policy_data = {
                 'PolicyID': '',
                 'Name': '',
@@ -25,6 +32,8 @@ def extract_policy_info(pdf_path):
                 'AccountNumber': '',
                 'IFSCCode': '',
                 'GSTNumber': '',
+                'FamilyID': '',
+                'NomineeName': '',
                 'Details': ''
             }
             
@@ -33,16 +42,38 @@ def extract_policy_info(pdf_path):
             details = []
             in_details = False
             
+            # Debug: Track what we're finding
+            found_fields = []
+            
             for line in text.split('\n'):
-                # PolicyID
-                policy_id_match = re.search(r'PolicyID:\s*(POL-\d+)', line)
+                # PolicyID - more flexible
+                policy_id_match = re.search(r'PolicyID:\s*(POL-\d+)', line, re.IGNORECASE)
                 if policy_id_match:
                     policy_data['PolicyID'] = clean_text(policy_id_match.group(1))
+                    found_fields.append('PolicyID')
+                else:
+                    # Try alternative patterns
+                    policy_id_match = re.search(r'Policy\s*ID:\s*(POL-\d+)', line, re.IGNORECASE)
+                    if policy_id_match:
+                        policy_data['PolicyID'] = clean_text(policy_id_match.group(1))
+                        found_fields.append('PolicyID')
                 
-                # Name
-                name_match = re.search(r'Name:\s*([^$\n]+)', line)
+                # Name - more flexible
+                name_match = re.search(r'Name:\s*([^$\n]+)', line, re.IGNORECASE)
                 if name_match:
                     policy_data['Name'] = clean_text(name_match.group(1))
+                    found_fields.append('Name')
+                else:
+                    # Try alternative patterns
+                    name_match = re.search(r'Policyholder:\s*([^$\n]+)', line, re.IGNORECASE)
+                    if name_match:
+                        policy_data['Name'] = clean_text(name_match.group(1))
+                        found_fields.append('Name')
+                    else:
+                        name_match = re.search(r'Insured:\s*([^$\n]+)', line, re.IGNORECASE)
+                        if name_match:
+                            policy_data['Name'] = clean_text(name_match.group(1))
+                            found_fields.append('Name')
                 
                 # DOB
                 dob_match = re.search(r'DOB:\s*(\d{2}/\d{2}/\d{4})', line)
@@ -89,6 +120,45 @@ def extract_policy_info(pdf_path):
                 if gst_match:
                     policy_data['GSTNumber'] = clean_text(gst_match.group(1))
                 
+                # FamilyID - more flexible pattern
+                family_id_match = re.search(r'FamilyID:\s*(FID-\d+)', line, re.IGNORECASE)
+                if family_id_match:
+                    policy_data['FamilyID'] = clean_text(family_id_match.group(1))
+                    found_fields.append('FamilyID')
+                else:
+                    # Try alternative patterns
+                    family_id_match = re.search(r'Family\s*ID:\s*(FID-\d+)', line, re.IGNORECASE)
+                    if family_id_match:
+                        policy_data['FamilyID'] = clean_text(family_id_match.group(1))
+                        found_fields.append('FamilyID')
+                    else:
+                        family_id_match = re.search(r'Family\s*:\s*(FID-\d+)', line, re.IGNORECASE)
+                        if family_id_match:
+                            policy_data['FamilyID'] = clean_text(family_id_match.group(1))
+                            found_fields.append('FamilyID')
+                
+                # NomineeName - more flexible pattern
+                nominee_name_match = re.search(r'NomineeName:\s*([^$\n]+)', line, re.IGNORECASE)
+                if nominee_name_match:
+                    policy_data['NomineeName'] = clean_text(nominee_name_match.group(1))
+                    found_fields.append('NomineeName')
+                else:
+                    # Try alternative patterns
+                    nominee_name_match = re.search(r'Nominee\s*Name:\s*([^$\n]+)', line, re.IGNORECASE)
+                    if nominee_name_match:
+                        policy_data['NomineeName'] = clean_text(nominee_name_match.group(1))
+                        found_fields.append('NomineeName')
+                    else:
+                        nominee_name_match = re.search(r'Nominee:\s*([^$\n]+)', line, re.IGNORECASE)
+                        if nominee_name_match:
+                            policy_data['NomineeName'] = clean_text(nominee_name_match.group(1))
+                            found_fields.append('NomineeName')
+                        else:
+                            nominee_name_match = re.search(r'Beneficiary:\s*([^$\n]+)', line, re.IGNORECASE)
+                            if nominee_name_match:
+                                policy_data['NomineeName'] = clean_text(nominee_name_match.group(1))
+                                found_fields.append('NomineeName')
+                
                 # Collect Details/Terms and Conditions
                 if 'Terms and Conditions:' in line:
                     in_details = True
@@ -99,6 +169,12 @@ def extract_policy_info(pdf_path):
             # Join all details into one string
             if details:
                 policy_data['Details'] = ' '.join(details)
+            
+            # Debug: Show what fields were found
+            print(f"Fields found: {found_fields}")
+            print(f"FamilyID: '{policy_data['FamilyID']}'")
+            print(f"NomineeName: '{policy_data['NomineeName']}'")
+            print("-" * 30)
             
             # Only add if we have essential information
             if policy_data['PolicyNumber'] or policy_data['PolicyID']:
@@ -130,10 +206,10 @@ def main():
     if all_data:
         df = pd.DataFrame(all_data)
         
-        # Ensure columns are in the specified order
+        # Ensure columns are in the specified order including nominee name only
         columns = ['PolicyID', 'Name', 'DOB', 'PolicyNumber', 'InsuranceType', 
                   'IssueDate', 'ExpiryDate', 'PremiumAmount', 'AccountNumber', 
-                  'IFSCCode', 'GSTNumber', 'Details']
+                  'IFSCCode', 'GSTNumber', 'FamilyID', 'NomineeName', 'Details']
         
         df = df[columns]  # Reorder columns
         
